@@ -55,9 +55,9 @@ export async function analyze(query, nodes, projectId = null) {
     return result
 
   } catch (error) {
-    console.error('[ConferSafe] Error en la llamada:', error.message)
-    // return await _offlineFallback(query, nodes) // <--- Comenta esto para probar
-    throw error; // Esto hará que el chat muestre un error real si la IA no responde
+    console.warn('[ConferSafe] Backend no disponible, usando modo offline:', error.message)
+    // Fall back to the original mock logic so the app still works
+    return await _offlineFallback(query, nodes)
   }
 }
 
