@@ -1,52 +1,247 @@
 """
 gemini_service.py — Confi's brain powered by Google Gemini.
 
-Responsibilities:
-  1. Build a rich system prompt with construction-specific expertise.
-  2. Inject project context (nodes, risks, deadlines) into every call.
-  3. Parse Gemini's response into the structured AgentResponse format.
-  4. Detect intent and classify urgency (matching the frontend's logic).
+v2 — Intent Routing:
+  CASO A: Consulta de datos del proyecto → RAG Local (datos reales del XML/nodos)
+  CASO B: Consulta técnica de ingeniería → Conocimiento general + contexto obra
+  BLOQUEO: Consultas pre-operativas → Rechazo amable con redireccionamiento
 """
 
 import os
 import json
 import re
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict
 from pathlib import Path
 from dotenv import load_dotenv
 import google.generativeai as genai
 
-# ── Config ─────────────────────────────────────────────────────────────────────
 load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
-# 3. (Opcional) Agregar impresiones de confirmación para depuración
 print(f"[ConferSafe] .env path: {Path(__file__).parent / '.env'}")
-
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-
-# Confirmar si la clave se cargó correctamente
 print(f"[ConferSafe] GEMINI_API_KEY cargada: {'SI ✔' if GEMINI_API_KEY else 'NO ✘'}")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
     _model = genai.GenerativeModel(
-        model_name="gemini-3-flash-preview",
+        model_name="gemini-3.1-flash-lite",
         generation_config=genai.GenerationConfig(
             temperature=0.4,
             top_p=0.9,
             max_output_tokens=2048,
         ),
     )
+    print("[ConferSafe] Modelo Gemini inicializado ✔")
 else:
     _model = None
+    print("[ConferSafe] Modo fallback — sin Gemini")
 
-# ── Urgency helper (mirrors frontend decisionGraph.js) ─────────────────────────
+
+# ── Clasificación de intents ────────────────────────────────────────────────────
+
+# CASO A: consultas sobre datos específicos del proyecto
+PROJECT_DATA_KEYWORDS = [
+    "partida", "excavaci", "cimentaci", "estructura", "sotano", "sotano",
+    "piso", "nivel", "fase", "cronograma", "plazo", "fecha", "termina",
+    "cuándo", "cuando", "cuánto cuesta", "presupuesto", "costo", "recurso",
+    "rendimiento", "cuadrilla", "avance", "porcentaje", "tarea", "hito",
+    "instalaci", "acabado", "concreto", "acero", "vaciado", "encofrado",
+    "hvac", "sanitaria", "electrica", "contraincendio", "muro pantalla",
+    "topografia", "replanteo", "mileston", "wbs", "ruta critica", "holgura",
+    "inicio de obra", "entrega", "semana", "dias", "dias restantes",
+    "cuántas semanas", "cuántos dias", "cuántos dias",
+]
+
+# CASO B: consultas técnicas de ingeniería (conocimiento general)
+ENGINEERING_KEYWORDS = [
+    "norma", "rne", "e.030", "e.060", "e.020", "astm", "aci", "iso",
+    "segregacion", "curado", "fragua", "slump", "asentamiento", "concreto en clima",
+    "patologia", "fisura", "grieta", "corrosion", "refuerzo", "diseño estructural",
+    "calculo", "formula", "especificacion", "procedimiento constructivo",
+    "encofrado tipo", "vibrado", "compactacion", "proctor", "cbr",
+    "nivel freatico", "estabilizacion", "geotecnia", "ensayo",
+    "como se hace", "como resuelvo", "que dice la norma", "que recomienda",
+    "mejores practicas", "tecnica", "metodo",
+]
+
+# BLOQUEO: fases pre-operativas (fuera del scope del MVP)
+PRE_OPERATIVE_KEYWORDS = [
+    "diseño arquitectonico", "diseño arquitectónico", "planos arquitectonicos",
+    "licencia de construccion", "licencia municipal", "tramite municipal",
+    "permiso de construccion", "expediente tecnico", "estudio de suelos fase",
+    "anteproyecto", "proyecto de inversion", "snip", "invierte.pe fase",
+    "estudios previos", "factibilidad", "perfil de proyecto",
+    "licitacion de diseño", "concurso de diseño",
+]
+
+CONSTRUCTION_INTENTS = [
+    ("contratista", ["contratista", "empresa", "constructor", "adjudicaci", "licitaci", "propuesta"]),
+    ("proveedor",   ["proveedor", "concreto", "acero", "material", "suministro", "insumo", "compra"]),
+    ("riesgo",      ["riesgo", "problema", "retraso", "demora", "peligro", "vence", "venci", "alert", "critico"]),
+    ("resumen",     ["resumen", "estado", "overview", "cómo", "como", "semana", "hoy", "situaci", "hola", "quien eres"]),
+]
+
+
+def classify_query(query: str) -> str:
+    """
+    Clasifica la consulta en uno de tres routing modes:
+    - 'rag_local': consulta de datos del proyecto (Caso A)
+    - 'engineering': consulta técnica de ingeniería (Caso B)
+    - 'blocked': consulta pre-operativa (bloquear)
+    - 'general': consulta general del proyecto
+    """
+    q = query.lower()
+
+    # Primero verificar bloqueo
+    if any(kw in q for kw in PRE_OPERATIVE_KEYWORDS):
+        return "blocked"
+
+    # Luego verificar si es técnica de ingeniería
+    if any(kw in q for kw in ENGINEERING_KEYWORDS):
+        return "engineering"
+
+    # Luego verificar si es sobre datos del proyecto
+    if any(kw in q for kw in PROJECT_DATA_KEYWORDS):
+        return "rag_local"
+
+    return "general"
+
+
+def detect_intent(query: str) -> str:
+    q = query.lower()
+    for intent, keywords in CONSTRUCTION_INTENTS:
+        if any(kw in q for kw in keywords):
+            return intent
+    return "resumen"
+
+
+# ── System prompts por modo ────────────────────────────────────────────────────
+
+SYSTEM_PROMPT_RAG = """Eres **Confi**, el asistente de control de obra de ConferSafe.
+
+## Modo activo: CONSULTA DE DATOS DEL PROYECTO (RAG Local)
+
+En este modo, responde ÚNICAMENTE con información extraída de los datos reales del proyecto que se te proporcionan.
+NO inventes fechas, costos, rendimientos ni recursos. Si no encuentras el dato, dilo claramente.
+
+## Reglas de este modo
+- Cita los datos exactos: fechas, costos en S/, rendimientos, nombres de recursos.
+- Si preguntan por una partida específica, busca en el contexto y responde con precisión.
+- Si el dato no está en el contexto, di "No tengo ese dato en el cronograma cargado".
+- Sé específico: "La partida A08 Excavación masiva inicia el 10/09/2026 y termina el 26/10/2026, con la Cuadrilla de Excavación + Volquetes a S/ 1,116,356".
+
+## Formato de respuesta (JSON estricto, sin markdown):
+{
+  "intent": "rag_local",
+  "summary": "<respuesta directa con datos exactos del proyecto>",
+  "critical_decisions": [],
+  "risk_message": "<riesgos específicos si los hay>",
+  "affected_days": 0,
+  "affected_cost": 0,
+  "suggestions": ["<acción concreta basada en los datos>"],
+  "actions": []
+}
+"""
+
+SYSTEM_PROMPT_ENGINEERING = """Eres **Confi**, el asistente de control de obra de ConferSafe.
+
+## Modo activo: CONSULTA TÉCNICA DE INGENIERÍA
+
+En este modo puedes usar tu conocimiento general de ingeniería civil y construcción, pero SIEMPRE aplicándolo al contexto específico de la obra en ejecución.
+
+## Reglas de este modo
+- Responde con fundamento técnico: cita normas (RNE, ACI, ASTM) cuando sea relevante.
+- Aplica la respuesta al contexto de la obra que se describe en los datos del proyecto.
+- Sé práctico: el PM necesita saber qué hacer HOY en campo, no un ensayo académico.
+- Menciona riesgos específicos para el proyecto si la consulta los implica.
+- Ejemplos de consultas válidas: "¿Cómo resuelvo una segregación en columna?", "¿Qué dice el RNE sobre curado en clima cálido?", "¿Cuál es el slump adecuado para losas de entrepiso?".
+
+## Formato de respuesta (JSON estricto, sin markdown):
+{
+  "intent": "engineering",
+  "summary": "<respuesta técnica directa aplicada al contexto de la obra>",
+  "critical_decisions": [],
+  "risk_message": "<implicaciones de riesgo para el proyecto si aplica>",
+  "affected_days": 0,
+  "affected_cost": 0,
+  "suggestions": [
+    "<paso 1 concreto para aplicar en campo>",
+    "<paso 2 con referencia normativa si aplica>",
+    "<paso 3>"
+  ],
+  "actions": []
+}
+"""
+
+SYSTEM_PROMPT_GENERAL = """Eres **Confi**, el asesor experto en gestión de proyectos de construcción civil de ConferSafe.
+
+## Tu personalidad
+- Hablas en español, tono profesional pero conversacional y fluido.
+- No saludes siempre de la misma forma. Sé natural.
+- Eres directo y concreto, especialmente cuando hay algo urgente.
+- Conoces la normativa peruana: RNE, INVIERTE.PE, OSCE, SUNARP.
+- Dominas CPM/PERT y gestión de riesgos en obra.
+
+## Tu objetivo
+Analizar el estado actual del proyecto y dar recomendaciones accionables para evitar retrasos y sobrecostos en la EJECUCIÓN de obra.
+
+## Scope del sistema
+ConferSafe está optimizado para la FASE DE EJECUCIÓN (construcción). Si te preguntan sobre fases pre-operativas (diseño, licencias, permisos antes del inicio), redirige amablemente hacia el control de ejecución.
+
+## Formato de respuesta (JSON estricto, sin markdown):
+{
+  "intent": "<contratista|proveedor|riesgo|resumen>",
+  "summary": "<2-3 oraciones, respuesta directa a lo preguntado>",
+  "critical_decisions": [
+    {
+      "id": "<node_id>",
+      "urgency_reason": "<por qué es urgente>",
+      "suggested_action": "<acción concreta>"
+    }
+  ],
+  "risk_message": "<predicción de riesgo con números>",
+  "affected_days": <número>,
+  "affected_cost": <número>,
+  "suggestions": ["<paso 1>", "<paso 2>", "<paso 3>"],
+  "actions": [
+    {
+      "nodeId": "<id>",
+      "newStatus": "<pending|review|approved|risk|done>",
+      "label": "<etiqueta>"
+    }
+  ]
+}
+
+## Reglas
+- Si el usuario solo saluda o pregunta quién eres, sé breve y amigable en summary.
+- No repitas datos que ya aparecen en los cuadros del frontend.
+- affected_days y affected_cost son números, no strings.
+- Máximo 3 critical_decisions y 3 actions.
+- Sugerencias con nombres reales de responsables y fechas concretas cuando estén disponibles.
+"""
+
+BLOCKED_RESPONSE_TEMPLATE = {
+    "intent": "blocked",
+    "summary": "Esta consulta está relacionada con fases pre-operativas (diseño, licencias, trámites municipales previos al inicio de obra). ConferSafe está optimizado para el control de la EJECUCIÓN de obra — desde el Hito de Inicio hasta la Entrega Final. Para esa fase, puedo ayudarte a monitorear partidas, rendimientos, riesgos en campo y decisiones críticas de construcción.",
+    "critical_decisions": [],
+    "risk_message": "Redirige la consulta al control de ejecución para obtener valor real del sistema.",
+    "affected_days": 0,
+    "affected_cost": 0,
+    "suggestions": [
+        "Consulta el estado de las partidas de ejecución activas.",
+        "Pregúntame por rendimientos de cuadrillas o costos de fases constructivas.",
+        "Revisa qué decisiones críticas de obra están próximas a vencer.",
+    ],
+    "actions": [],
+}
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def urgency_of(node: dict) -> str:
-    status    = node.get("status", "pending")
-    remaining = node.get("remaining") if node.get("remaining") is not None else node.get("remaining")
+    status = node.get("status", "pending")
+    remaining = node.get("remaining")
     if status == "risk" or (remaining is not None and remaining < 0):
         return "critical"
     if remaining is not None and remaining <= 4:
@@ -66,179 +261,103 @@ def fmt_soles(n: float) -> str:
     return f"{int(n):,}".replace(",", ".")
 
 
-# ── Intent detection (mirrors frontend assistantService.js) ───────────────────
-
-INTENTS = [
-    ("contratista", ["contratista", "empresa", "constructor", "adjudicaci", "licitaci", "propuesta"]),
-    ("proveedor",   ["proveedor", "concreto", "acero", "material", "suministro", "insumo", "compra"]),
-    ("permisos",    ["permiso", "licencia", "municipal", "autoriza", "tramite", "trámite", "legal"]),
-    ("riesgo",      ["riesgo", "problema", "retraso", "demora", "peligro", "vence", "venci", "alert"]),
-    ("resumen",     ["resumen", "estado", "overview", "cómo", "como", "semana", "hoy", "situaci"]),
-]
-
-def detect_intent(query: str) -> str:
-    q = query.lower()
-    for intent, keywords in INTENTS:
-        if any(kw in q for kw in keywords):
-            return intent
-    return "resumen"
-
-
-# ── System prompt ──────────────────────────────────────────────────────────────
-
-SYSTEM_PROMPT = """Eres **Confi**, el asesor experto en gestión de proyectos de construcción civil de ConferSafe.
-
-## Tu personalidad
-- Hablas en español, con un tono profesional pero **conversacional y fluido**.
-- No saludes siempre de la misma forma. Si te preguntan tu nombre, responde amablemente y luego pasa al análisis.
-- **Evita sonar como un robot que lee datos.** En lugar de decir "El avance es 33%", di "Vamos por un tercio del camino, pero tenemos algunos cuellos de botella".
-- Eres directo y  concreto si hay alguna falta grave o algo urgente.
-- Conoces profundamente la normativa peruana de construcción (RNE, INVIERTE.PE, OSCE, SUNARP).
-- Entiendes la metodología de Ruta Crítica (CPM/PERT) y gestión de riesgos en obra.
-
-## Tu objetivo
-Analizar el estado actual del proyecto y dar recomendaciones accionables para evitar retrasos y sobrecostos.
-
-## Formato de respuesta
-Responde SIEMPRE con un JSON válido con esta estructura exacta (sin markdown, sin explicaciones fuera del JSON):
-
-{
-  "intent": "<contratista|proveedor|permisos|riesgo|resumen>",
-  "summary": "<resumen ejecutivo de 2-3 oraciones>",
-  "critical_decisions": [
-    {
-      "id": "<node_id>",
-      "urgency_reason": "<por qué es urgente>",
-      "suggested_action": "<acción concreta esta semana>"
-    }
-  ],
-  "risk_message": "<predicción de riesgo específica con números>",
-  "affected_days": <número>,
-  "affected_cost": <número>,
-  "suggestions": [
-    "<paso concreto 1>",
-    "<paso concreto 2>",
-    "<paso concreto 3>"
-  ],
-  "actions": [
-    {
-      "nodeId": "<id>",
-      "newStatus": "<pending|review|approved|risk|done>",
-      "label": "<etiqueta del botón>"
-    }
-  ]
-}
-
-## Reglas
-- Tu `summary` debe ser la respuesta directa a lo que el usuario preguntó.
-- Si el usuario solo dice "hola" o te pregunta quién eres, sé breve y amigable en el `summary`, pero igual llena los datos técnicos del JSON de forma silenciosa para que el frontend tenga qué mostrar.
-- **IMPORTANTE**: No repitas datos que ya aparecen en los cuadros inferiores dentro de tu mensaje de texto principal.
-- `affected_days` y `affected_cost` deben ser números, no strings.
-- `actions` solo incluye nodos que realmente necesitan cambio de estado HOY.
-- Máximo 3 elementos en `critical_decisions`.
-- Máximo 3 elementos en `actions`.
-- Las sugerencias deben ser específicas: menciona nombres de responsables, fechas concretas, normativa aplicable.
-"""
-
-
 # ── Context builder ────────────────────────────────────────────────────────────
 
-def build_project_context(project_id: str, nodes: List[dict]) -> str:
-    """
-    Summarize the current project state into a compact text block
-    that Gemini can reason about.
-    """
+def build_project_context(project_id: str, nodes: List[dict], rag_context: Optional[str] = None) -> str:
     today = datetime.now().strftime("%d/%m/%Y")
 
-    risk_nodes    = [n for n in nodes if n.get("status") == "risk"]
-    pending_nodes = [n for n in nodes if n.get("status") == "pending"]
-    review_nodes  = [n for n in nodes if n.get("status") == "review"]
-    done_nodes    = [n for n in nodes if n.get("status") in ("approved", "done")]
-    critical_nodes= [n for n in nodes if n.get("critical")]
+    # Si hay contexto RAG del XML, úsalo como base
+    if rag_context:
+        lines = [
+            f"=== DATOS DEL PROYECTO: {project_id} | Hoy: {today} ===",
+            rag_context,
+            "",
+            "=== ESTADO ACTUAL DE DECISIONES ===",
+        ]
+    else:
+        risk_nodes = [n for n in nodes if n.get("status") == "risk"]
+        pending_nodes = [n for n in nodes if n.get("status") == "pending"]
+        done_nodes = [n for n in nodes if n.get("status") in ("approved", "done")]
+        impact = total_impact([n for n in nodes if n.get("status") in ("risk", "pending")])
+        lines = [
+            f"=== PROYECTO: {project_id} | Hoy: {today} ===",
+            f"Decisiones: {len(nodes)} total | {len(done_nodes)} completadas | {len(risk_nodes)} en riesgo | {len(pending_nodes)} pendientes",
+            f"Impacto acumulado: {impact['days']}d / S/{fmt_soles(impact['cost'])}",
+            "",
+        ]
 
-    impact = total_impact([n for n in nodes if n.get("status") in ("risk", "pending")])
+    # Siempre incluir estado de nodos críticos
+    risk_nodes = [n for n in nodes if n.get("status") == "risk"]
+    urgent = [n for n in nodes if n.get("remaining") is not None and 0 <= (n.get("remaining") or 0) <= 7]
+    critical = [n for n in nodes if n.get("critical")]
 
-    lines = [
-        f"=== PROYECTO: {project_id} | Fecha hoy: {today} ===",
-        f"Total decisiones: {len(nodes)} | Completadas: {len(done_nodes)} | En riesgo: {len(risk_nodes)} | Pendientes: {len(pending_nodes)} | En revisión: {len(review_nodes)}",
-        f"Impacto acumulado no resuelto: {impact['days']} días | S/ {fmt_soles(impact['cost'])}",
-        "",
-        "--- DECISIONES EN RIESGO (CRÍTICAS) ---",
-    ]
+    if risk_nodes:
+        lines.append("EN RIESGO:")
+        for n in risk_nodes[:5]:
+            rem = n.get("remaining", 0)
+            rem_txt = f"{abs(rem)}d vencida" if rem is not None and rem < 0 else f"{rem}d"
+            lines.append(f"  [{n.get('code','?')}] {n.get('title','')} | {n.get('owner','')} | {rem_txt} | S/{fmt_soles(n.get('impactCost', n.get('impact_cost', 0)))}")
 
-    for n in sorted(risk_nodes, key=lambda x: x.get("remaining", 0) or 0):
-        remaining = n.get("remaining")
-        rem_txt = f"{abs(remaining)}d vencida" if remaining is not None and remaining < 0 else f"{remaining}d restantes"
-        lines.append(
-            f"  [{n.get('code','?')}] {n.get('title','')} | Resp: {n.get('owner','')} | {rem_txt} | "
-            f"Impacto: {n.get('impactDays', n.get('impact_days',0))}d / S/{fmt_soles(n.get('impactCost', n.get('impact_cost',0)))}"
-        )
+    if urgent:
+        lines.append("URGENTES (≤7d):")
+        for n in urgent[:5]:
+            lines.append(f"  [{n.get('code','?')}] {n.get('title','')} | {n.get('remaining')}d")
 
-    lines.append("")
-    lines.append("--- DECISIONES URGENTES (≤ 7 días) ---")
-    urgent = [n for n in pending_nodes + review_nodes
-              if n.get("remaining") is not None and 0 <= n.get("remaining") <= 7]
-    for n in sorted(urgent, key=lambda x: x.get("remaining", 0)):
-        lines.append(
-            f"  [{n.get('code','?')}] {n.get('title','')} | Resp: {n.get('owner','')} | "
-            f"{n.get('remaining')}d restantes | Impacto: {n.get('impactDays', n.get('impact_days',0))}d"
-        )
-
-    lines.append("")
-    lines.append("--- RUTA CRÍTICA ---")
-    for n in critical_nodes:
-        status = n.get("status", "?")
-        remaining = n.get("remaining")
-        rem_txt = "sin fecha" if remaining is None else (
-            f"{abs(remaining)}d vencida" if remaining < 0 else f"{remaining}d"
-        )
-        lines.append(f"  [{n.get('code','?')}] {n.get('title','')} | Estado: {status} | {rem_txt}")
-
-    lines.append("")
-    lines.append("--- TODAS LAS DECISIONES (resumen) ---")
-    for n in nodes:
-        remaining = n.get("remaining")
-        rem_txt = "—" if remaining is None else (
-            f"{abs(remaining)}d vencida" if remaining < 0 else f"{remaining}d"
-        )
-        parent_id = n.get("parent") or n.get("parent_id")
-        lines.append(
-            f"  [{n.get('code','?')}] {n.get('title','')} | {n.get('status','')} | "
-            f"Resp: {n.get('owner','')} | {rem_txt} | Padre: {parent_id or 'raíz'}"
-        )
+    if critical:
+        lines.append("RUTA CRÍTICA:")
+        for n in critical[:8]:
+            rem = n.get("remaining")
+            rem_txt = "—" if rem is None else (f"{abs(rem)}d vencida" if rem < 0 else f"{rem}d")
+            lines.append(f"  [{n.get('code','?')}] {n.get('title','')} | {n.get('status','')} | {rem_txt}")
 
     return "\n".join(lines)
 
 
-# ── Gemini call ────────────────────────────────────────────────────────────────
+# ── Main Gemini call ───────────────────────────────────────────────────────────
 
 async def call_gemini(
     query: str,
     project_id: str,
     nodes: List[dict],
     conversation_history: Optional[List[dict]] = None,
+    rag_context: Optional[str] = None,
 ) -> dict:
     """
-    Main entry point. Returns a structured dict matching AgentResponse schema.
-    Falls back to a deterministic response if Gemini is unavailable.
+    Punto de entrada principal con routing de intents.
     """
+    routing_mode = classify_query(query)
     intent = detect_intent(query)
+
+    print(f"[Confi] Query: '{query[:60]}' → Routing: {routing_mode}")
+
+    # BLOQUEO: consultas pre-operativas
+    if routing_mode == "blocked":
+        response = dict(BLOCKED_RESPONSE_TEMPLATE)
+        response["timestamp"] = datetime.now().isoformat()
+        response["query"] = query
+        return response
 
     if not _model:
         return _fallback_response(query, intent, nodes)
 
-    context = build_project_context(project_id, nodes)
+    # Seleccionar system prompt según routing
+    if routing_mode == "rag_local":
+        system_prompt = SYSTEM_PROMPT_RAG
+    elif routing_mode == "engineering":
+        system_prompt = SYSTEM_PROMPT_ENGINEERING
+    else:
+        system_prompt = SYSTEM_PROMPT_GENERAL
 
-    # Build Gemini conversation history (last 4 turns for context)
-    history = conversation_history or []
-    history = history[-8:] if len(history) > 8 else history  # keep last 4 exchanges
+    context = build_project_context(project_id, nodes, rag_context)
 
-    gemini_history = []
-    for turn in history:
-        role = "user" if turn.get("role") == "user" else "model"
-        gemini_history.append({"role": role, "parts": [turn.get("content", "")]})
+    # Historial de conversación (últimos 4 turnos)
+    history = (conversation_history or [])[-8:]
+    gemini_history = [
+        {"role": "user" if t.get("role") == "user" else "model", "parts": [t.get("content", "")]}
+        for t in history
+    ]
 
-    full_prompt = f"{SYSTEM_PROMPT}\n\n{context}\n\nPREGUNTA DEL USUARIO: {query}"
+    full_prompt = f"{system_prompt}\n\n{context}\n\nPREGUNTA DEL USUARIO: {query}"
 
     try:
         if gemini_history:
@@ -248,8 +367,8 @@ async def call_gemini(
             response = _model.generate_content(full_prompt)
 
         raw_text = response.text.strip()
-        print(f"[Gemini OK] {len(raw_text)} chars")
-        print(f"[Gemini RAW] {raw_text[:400]}")
+        print(f"[Gemini OK] {routing_mode} | {len(raw_text)} chars")
+        print(f"[Gemini RAW] {raw_text[:300]}...")
         return _parse_gemini_response(raw_text, query, intent, nodes)
 
     except Exception as e:
@@ -262,14 +381,7 @@ async def call_gemini(
 # ── Response parser ────────────────────────────────────────────────────────────
 
 def _parse_gemini_response(raw: str, query: str, intent: str, nodes: List[dict]) -> dict:
-    """
-    Parse Gemini's JSON output and enrich with urgency classification.
-    Falls back gracefully if parsing fails.
-    """
-    # Strip markdown code fences if present
     cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip().rstrip("`").strip()
-
-    # Find the JSON object
     match = re.search(r"\{.*\}", cleaned, re.DOTALL)
     if not match:
         return _fallback_response(query, intent, nodes, raw=raw)
@@ -281,12 +393,10 @@ def _parse_gemini_response(raw: str, query: str, intent: str, nodes: List[dict])
 
     node_map = {n.get("id"): n for n in nodes}
 
-    # Enrich critical_decisions with real node data
     critical_decisions = []
     for cd in data.get("critical_decisions", []):
         node = node_map.get(cd.get("id"))
         if not node:
-            # Try to find by matching title fragment
             for n in nodes:
                 if cd.get("id", "").lower() in n.get("title", "").lower():
                     node = n
@@ -304,11 +414,9 @@ def _parse_gemini_response(raw: str, query: str, intent: str, nodes: List[dict])
                 "urgency": urgency_of(node),
             })
 
-    # If Gemini gave no critical decisions, auto-pick the most urgent
-    if not critical_decisions:
+    if not critical_decisions and data.get("intent") not in ("rag_local", "engineering", "blocked"):
         critical_decisions = _auto_pick_critical(nodes)
 
-    # Build actions — validate nodes exist and state change makes sense
     actions = []
     for a in data.get("actions", []):
         node = node_map.get(a.get("nodeId"))
@@ -345,9 +453,8 @@ def _auto_pick_critical(nodes: List[dict], max_n: int = 3) -> List[dict]:
         [n for n in nodes if n.get("status") not in ("approved", "done")],
         key=lambda n: (order.get(urgency_of(n), 3), n.get("remaining", 999) or 999)
     )
-    result = []
-    for n in sorted_nodes[:max_n]:
-        result.append({
+    return [
+        {
             "id": n["id"],
             "code": n.get("code"),
             "title": n.get("title", ""),
@@ -357,75 +464,27 @@ def _auto_pick_critical(nodes: List[dict], max_n: int = 3) -> List[dict]:
             "impactDays": n.get("impactDays", n.get("impact_days", 0)),
             "impactCost": n.get("impactCost", n.get("impact_cost", 0)),
             "urgency": urgency_of(n),
-        })
-    return result
+        }
+        for n in sorted_nodes[:max_n]
+    ]
 
 
-# ── Fallback (when Gemini is not available) ────────────────────────────────────
+# ── Fallback ───────────────────────────────────────────────────────────────────
 
-def _fallback_response(
-    query: str, intent: str, nodes: List[dict],
-    error: str = "", raw: str = ""
-) -> dict:
-    """
-    Deterministic response mirroring the original frontend logic.
-    Used when GEMINI_API_KEY is missing or the API call fails.
-    """
+def _fallback_response(query: str, intent: str, nodes: List[dict], error: str = "", raw: str = "") -> dict:
     risk_nodes = [n for n in nodes if n.get("status") == "risk"]
     impact = total_impact([n for n in nodes if n.get("status") in ("risk", "pending")])
-    done   = [n for n in nodes if n.get("status") in ("approved", "done")]
-    critical= [n for n in nodes if n.get("critical") and n.get("status") not in ("approved", "done")]
-
+    done = [n for n in nodes if n.get("status") in ("approved", "done")]
+    critical = [n for n in nodes if n.get("critical") and n.get("status") not in ("approved", "done")]
     progress_pct = round(len(done) / len(nodes) * 100) if nodes else 0
 
-    critical_decisions = _auto_pick_critical(nodes)
-
-    # Intent-specific messages
     summaries = {
-        "contratista": "El proceso de selección del contratista tiene alertas activas. El retraso en la verificación de referencias puede bloquear la adjudicación esta semana.",
-        "proveedor":   "Hay proveedores críticos pendientes de confirmar. El retraso en materiales puede impactar el inicio de obra.",
-        "permisos":    "Los permisos municipales están en revisión. La licencia de edificación depende de trámites aún no cerrados.",
-        "riesgo":      f"Hay {len(risk_nodes)} decisión(es) en estado crítico. Impacto acumulado si no se actúa: {impact['days']} días y S/ {fmt_soles(impact['cost'])}.",
-        "resumen":     f"El proyecto lleva un {progress_pct}% de decisiones cerradas. Esta semana hay {len(critical)} nodos en la ruta crítica que necesitan atención.",
+        "contratista": "El proceso de selección del contratista tiene alertas activas.",
+        "proveedor": "Hay proveedores críticos pendientes de confirmar.",
+        "riesgo": f"Hay {len(risk_nodes)} decisión(es) en estado crítico. Impacto: {impact['days']}d / S/{fmt_soles(impact['cost'])}.",
+        "resumen": f"El proyecto lleva un {progress_pct}% de decisiones cerradas. Hay {len(critical)} nodos críticos pendientes.",
     }
 
-    risk_msgs = {
-        "contratista": f"La verificación de referencias vencida puede retrasar la adjudicación. Impacto acumulado: {impact['days']}d / S/{fmt_soles(impact['cost'])}.",
-        "proveedor":   f"Sin proveedor de concreto confirmado, el inicio de vaciado se corre. Riesgo: {impact['days']}d / S/{fmt_soles(impact['cost'])}.",
-        "permisos":    f"Los parámetros urbanísticos pendientes bloquean la licencia. Impacto: {impact['days']}d / S/{fmt_soles(impact['cost'])}.",
-        "riesgo":      f"El mayor riesgo activo involucra {len(risk_nodes)} decisión(es) vencidas. Total: {impact['days']}d / S/{fmt_soles(impact['cost'])}.",
-        "resumen":     f"El riesgo acumulado no resuelto es de {impact['days']} días y S/ {fmt_soles(impact['cost'])}.",
-    }
-
-    suggestions_map = {
-        "contratista": [
-            "Contactar a Daniela Cáceres hoy para obtener el informe de referencias.",
-            "Convocar al comité técnico para dictamen de propuestas antes del viernes.",
-            "Revisar cláusulas de penalidad en los contratos tipo antes de adjudicar.",
-        ],
-        "proveedor": [
-            "Pedir a Andrea Núñez el cuadro comparativo de cotizaciones de concreto.",
-            "Negociar precio fijo por m³ para los primeros 3 meses con la planta más cercana.",
-            "Confirmar el proveedor de acero antes del plazo para no afectar el cronograma.",
-        ],
-        "permisos": [
-            "Validar con Valeria Torres si el expediente fue admitido sin observaciones.",
-            "Solicitar reunión con el revisor de la Municipalidad esta semana.",
-            "Preparar planos de conformidad antes de que la licencia entre a revisión de campo.",
-        ],
-        "riesgo": [
-            f"Contactar al responsable de la decisión más crítica para obtener un estado hoy.",
-            "Escalar al director de proyecto si no hay respuesta antes del mediodía.",
-            "Revisar el árbol de decisiones para ver qué tareas quedan bloqueadas.",
-        ],
-        "resumen": [
-            "Enfocarse primero en cerrar la verificación de referencias del contratista.",
-            "Confirmar el proveedor de concreto para no dejar sin materiales el inicio de obra.",
-            "Solicitar avance de la licencia de edificación a la gestora legal.",
-        ],
-    }
-
-    # Auto actions
     actions = []
     for n in risk_nodes[:2]:
         if n.get("status") != "review":
@@ -440,14 +499,18 @@ def _fallback_response(
         "query": query,
         "intent": intent,
         "summary": summaries.get(intent, summaries["resumen"]),
-        "criticalDecisions": critical_decisions,
+        "criticalDecisions": _auto_pick_critical(nodes),
         "riskPrediction": {
-            "message": risk_msgs.get(intent, risk_msgs["resumen"]),
+            "message": f"Riesgo acumulado: {impact['days']}d / S/{fmt_soles(impact['cost'])}.",
             "affectedDays": impact["days"],
             "affectedCost": impact["cost"],
         },
-        "suggestions": suggestions_map.get(intent, suggestions_map["resumen"]),
+        "suggestions": [
+            "Conecta el backend para análisis con IA real.",
+            "Verifica que GEMINI_API_KEY esté configurada en .env.",
+            "Consulta el árbol de decisiones para ver el estado completo.",
+        ],
         "actions": actions[:3],
         "timestamp": datetime.now().isoformat(),
-        "raw_gemini_response": raw or f"[Fallback — Gemini no disponible: {error}]",
+        "raw_gemini_response": raw or f"[Fallback: {error}]",
     }

@@ -6,6 +6,7 @@ import uvicorn
 from database import engine, Base
 from routers import projects, nodes, agent
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Create all tables on startup
@@ -19,6 +20,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # In production, replace with your frontend URL
@@ -30,6 +33,7 @@ app.add_middleware(
 app.include_router(projects.router, prefix="/api/projects", tags=["Proyectos"])
 app.include_router(nodes.router, prefix="/api/nodes", tags=["Decisiones"])
 app.include_router(agent.router, prefix="/api/agent", tags=["Agente IA"])
+
 
 
 @app.get("/")

@@ -10,7 +10,7 @@ export const STATUS = {
 
 // ── Proyectos disponibles ────────────────────────────────────────────────────
 export const PROJECTS = [
-  { id: 'edificio-mirador', name: 'Edificio Mirador',  location: 'San Isidro, Lima',  abbr: 'EM', color: '#6366F1' },
+  { id: 'torre-b-utec', name: 'Proyecto Torre B - UTEC',  location: 'Barranco, Lima',  abbr: 'EM', color: '#6366F1' },
   { id: 'cc-el-sol',        name: 'CC El Sol',          location: 'Miraflores, Lima',  abbr: 'CS', color: '#0891B2' },
 ]
 

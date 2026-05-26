@@ -8,7 +8,7 @@ export default function Sidebar({ active, setActive, alertCount, progress, compl
 
   return (
     <aside style={{
-      width: 200, background: 'var(--bg-surface)',
+      width: 250, background: '#023047',
       borderRight: '1px solid var(--border)',
       boxShadow: '2px 0 12px rgba(59,130,246,0.06)',
       display: 'flex', flexDirection: 'column', flexShrink: 0,
@@ -17,15 +17,15 @@ export default function Sidebar({ active, setActive, alertCount, progress, compl
     }}>
 
       {/* Logo */}
-      <div style={{ padding: '20px 18px 14px' }}>
+      <div style={{ padding: '20px 18px 14px', background : '#023047'  }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <img
             src="/logo.png"
             alt="ConferSafe"
-            style={{ width: 36, height: 36, borderRadius: 10, objectFit: 'contain', flexShrink: 0 }}
+            style={{ width: 36, height: 36, borderRadius: 10, objectFit: 'contain', flexShrink: 0}}
           />
           <div style={{ lineHeight: 1.2 }}>
-            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-1)', letterSpacing: -0.3 }}>ConferSafe</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: 'white', letterSpacing: -0.3 }}>ConferSafe</div>
             <div style={{ fontSize: 10, color: 'var(--text-4)', marginTop: 1 }}>Gestión de decisiones</div>
           </div>
         </div>
@@ -37,7 +37,7 @@ export default function Sidebar({ active, setActive, alertCount, progress, compl
           onClick={() => setShowProjects(s => !s)}
           style={{
             width: '100%', padding: '9px 11px', borderRadius: 10,
-            background: 'var(--bg-surface-3)', border: '1px solid var(--border)',
+            background: 'white', border: '1px solid var(--border)',
             display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
             transition: 'all 0.15s',
           }}
@@ -63,7 +63,7 @@ export default function Sidebar({ active, setActive, alertCount, progress, compl
         {showProjects && (
           <div style={{
             position: 'absolute', top: 'calc(100% - 4px)', left: 12, right: 12, zIndex: 50,
-            background: 'var(--bg-surface)', border: '1px solid var(--border)',
+            background: 'white', border: '1px solid var(--border)',
             borderRadius: 10, boxShadow: 'var(--shadow-lg)', overflow: 'hidden',
             animation: 'dropDown 0.12s ease-out',
           }}>
@@ -102,8 +102,8 @@ export default function Sidebar({ active, setActive, alertCount, progress, compl
         {totalCount > 0 && (
           <div style={{ marginTop: 10 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
-              <span style={{ fontSize: 10, color: 'var(--text-4)', fontWeight: 600 }}>Progreso</span>
-              <span style={{ fontSize: 11, color: 'var(--blue)', fontWeight: 800 }}>{progress}%</span>
+              <span style={{ fontSize: 10, color: 'white', fontWeight: 600 }}>Progreso</span>
+              <span style={{ fontSize: 11, color: 'white', fontWeight: 800 }}>{progress}%</span>
             </div>
             <div style={{ height: 5, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
               <div style={{

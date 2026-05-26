@@ -106,10 +106,10 @@ class NodeOut(BaseModel):
         )
 
 
-# ── Batch node upsert (used when frontend syncs all nodes) ─────────────────────
+# ── Batch node upsert ──────────────────────────────────────────────────────────
 
 class NodesBatchUpsert(BaseModel):
-    nodes: List[dict]   # raw frontend node objects
+    nodes: List[dict]
 
 
 # ── Agent / Chat ───────────────────────────────────────────────────────────────
@@ -117,18 +117,18 @@ class NodesBatchUpsert(BaseModel):
 class AgentRequest(BaseModel):
     query: str
     project_id: str
-    nodes: List[dict]           # current node state from frontend
-    conversation_history: Optional[List[dict]] = []   # [{role, content}]
+    nodes: List[dict]
+    conversation_history: Optional[List[dict]] = []
 
 class CriticalDecision(BaseModel):
     id: str
-    code: Optional[str]
+    code: Optional[str] = None
     title: str
-    owner: Optional[str]
+    owner: Optional[str] = None
     status: str
-    remaining: Optional[int]
-    impactDays: int
-    impactCost: float
+    remaining: Optional[int] = None
+    impactDays: int = 0
+    impactCost: float = 0
     urgency: str
 
 class RiskPrediction(BaseModel):

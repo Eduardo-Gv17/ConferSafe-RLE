@@ -55,7 +55,7 @@ export default function App() {
   }
 
   const views = {
-    agente:     <ViewAgente nodes={nodes} setNodes={setNodes} setActive={setView} projectName={currentProject.name} />,
+    agente: <ViewAgente nodes={nodes} setNodes={setNodes} setActive={setView} projectName={currentProject.name} projectId={projectId} />,
     decisiones: <ViewDecisiones nodes={nodes} setNodes={setNodes} />,
     timeline:   <ViewTimeline nodes={nodes} setNodes={setNodes} />,
     arbol:      <ViewArbol nodes={nodes} setNodes={setNodes} />,
