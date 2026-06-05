@@ -18,7 +18,7 @@ export function clearConversationHistory() {
 
 // ── Main analyze function ────────────────────────────────────────────────────
 
-export async function analyze(query, nodes, projectId = null) {
+export async function analyze(query, nodes, projectId = null, attachments = null) {
   // Detect project from localStorage if not passed
   const project_id =
     projectId ||
@@ -36,6 +36,7 @@ export async function analyze(query, nodes, projectId = null) {
         project_id,
         nodes,
         conversation_history: conversationHistory.slice(-8),
+        attachments: attachments || [],
       }),
     })
 

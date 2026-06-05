@@ -4,7 +4,8 @@ from contextlib import asynccontextmanager
 import uvicorn
 
 from database import engine, Base
-from routers import projects, nodes, agent
+from routers import projects, nodes
+from routers import agent
 
 
 @asynccontextmanager

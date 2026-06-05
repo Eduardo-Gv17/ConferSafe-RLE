@@ -531,43 +531,95 @@ function MicButton({ onTranscript, disabled }) {
 }
 
 // ─── Input row ────────────────────────────────────────────────────────────────
-function InputRow({ value, onChange, onSubmit, disabled, placeholder, autoFocus }) {
+function InputRow({ value, onChange, onSubmit, disabled, placeholder, autoFocus, selectedFiles, setSelectedFiles }) {
   const ref = useRef(null)
+  const fileInputRef = useRef(null)
   useEffect(() => { if (autoFocus) ref.current?.focus() }, [autoFocus])
   const onKey = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSubmit() } }
-  const active = value.trim() && !disabled
+  const active = (value.trim() || selectedFiles.length > 0) && !disabled
+
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files || [])
+    setSelectedFiles(prev => [...prev, ...files])
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const removeFile = (idx) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== idx))
+  }
 
   return (
-    <div style={{
-      display: 'flex', alignItems: 'flex-end', gap: 6,
-      background: '#fff', border: '1.5px solid',
-      borderColor: disabled ? '#E8EFFE' : '#BFDBFE',
-      borderRadius: 16, padding: '6px 6px 6px 16px',
-      boxShadow: disabled ? 'none' : '0 2px 14px rgba(59,130,246,0.10)',
-      transition: 'box-shadow 0.2s, border-color 0.2s',
-    }}>
-      <textarea ref={ref} value={value} onChange={e => onChange(e.target.value)}
-        onKeyDown={onKey} disabled={disabled}
-        placeholder={disabled ? 'Analizando...' : placeholder}
-        rows={1}
-        style={{
-          flex: 1, border: 'none', outline: 'none', resize: 'none',
-          background: 'transparent', color: '#1E293B', fontSize: 14,
-          fontFamily: 'inherit', lineHeight: 1.5, padding: '6px 0',
-          opacity: disabled ? 0.5 : 1,
-        }}
-      />
-      <MicButton onTranscript={t => onChange(t)} disabled={disabled} />
-      <button onClick={onSubmit} disabled={!active} style={{
-        width: 38, height: 38, borderRadius: 10, flexShrink: 0, border: 'none',
-        background: active ? 'var(--gradient-primary)' : 'var(--bg-surface-2)',
-        cursor: active ? 'pointer' : 'not-allowed',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        boxShadow: active ? '0 2px 10px rgba(59,130,246,0.30)' : 'none',
-        transition: 'all 0.2s',
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {/* Badges de archivos adjuntos */}
+      {selectedFiles.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {selectedFiles.map((file, idx) => (
+            <div key={idx} style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: 'var(--blue-bg)', border: '1px solid var(--blue-border)',
+              borderRadius: 8, padding: '4px 10px', fontSize: 12, color: 'var(--text-1)',
+              fontWeight: 600,
+            }}>
+              <span>{file.type.startsWith('image/') ? '🖼️' : '📄'}</span>
+              <span style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+              <button onClick={() => removeFile(idx)} style={{
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                color: 'var(--text-3)', fontSize: 14, padding: 0, lineHeight: 1,
+              }}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {/* Input principal */}
+      <div style={{
+        display: 'flex', alignItems: 'flex-end', gap: 6,
+        background: '#fff', border: '1.5px solid',
+        borderColor: disabled ? '#E8EFFE' : '#BFDBFE',
+        borderRadius: 16, padding: '6px 6px 6px 16px',
+        boxShadow: disabled ? 'none' : '0 2px 14px rgba(59,130,246,0.10)',
+        transition: 'box-shadow 0.2s, border-color 0.2s',
       }}>
-        <Icon d="M5 12h14M12 5l7 7-7 7" size={15} color={active ? '#fff' : '#94A3B8'} stroke={2.2}/>
-      </button>
+        <button onClick={() => fileInputRef.current?.click()} disabled={disabled} title="Adjuntar archivo" style={{
+          width: 36, height: 36, borderRadius: 10, border: 'none', flexShrink: 0,
+          background: '#F1F5F9', cursor: disabled ? 'not-allowed' : 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'background 0.2s',
+          marginLeft: -8,
+        }}
+          onMouseEnter={e => !disabled && (e.currentTarget.style.background = '#E2E8F0')}
+          onMouseLeave={e => (e.currentTarget.style.background = '#F1F5F9')}
+        >
+          <Icon d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" size={16} color="#64748B" stroke={1.8} />
+        </button>
+
+        <textarea ref={ref} value={value} onChange={e => onChange(e.target.value)}
+          onKeyDown={onKey} disabled={disabled}
+          placeholder={disabled ? 'Analizando...' : placeholder}
+          rows={1}
+          style={{
+            flex: 1, border: 'none', outline: 'none', resize: 'none',
+            background: 'transparent', color: '#1E293B', fontSize: 14,
+            fontFamily: 'inherit', lineHeight: 1.5, padding: '6px 0',
+            opacity: disabled ? 0.5 : 1,
+          }}
+        />
+        <MicButton onTranscript={t => onChange(t)} disabled={disabled} />
+        <button onClick={onSubmit} disabled={!active} style={{
+          width: 38, height: 38, borderRadius: 10, flexShrink: 0, border: 'none',
+          background: active ? 'var(--gradient-primary)' : 'var(--bg-surface-2)',
+          cursor: active ? 'pointer' : 'not-allowed',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: active ? '0 2px 10px rgba(59,130,246,0.30)' : 'none',
+          transition: 'all 0.2s',
+        }}>
+          <Icon d="M5 12h14M12 5l7 7-7 7" size={15} color={active ? '#fff' : '#94A3B8'} stroke={2.2}/>
+        </button>
+      </div>
+
+      {/* Input file oculto */}
+      <input ref={fileInputRef} type="file" multiple style={{ display: 'none' }}
+        onChange={handleFileSelect} />
     </div>
   )
 }
@@ -759,12 +811,47 @@ function FullResponse({ result, setActive, nodes, setNodes }) {
   )
 }
 
+// Helper for base64 file conversion
+const fileToBase64 = (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.readAsDataURL(file)
+    reader.onload = () => {
+      const result = reader.result
+      const base64Str = result.split(',')[1]
+      resolve(base64Str)
+    }
+    reader.onerror = (error) => reject(error)
+  })
+}
+
 // ─── Compact previous turn ────────────────────────────────────────────────────
 function CompactTurn({ turn }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, opacity: 0.55 }}>
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <div style={{ maxWidth: '72%', padding: '8px 14px', borderRadius: '12px 4px 12px 12px', background: '#BFDBFE', color: '#1E3A8A', fontSize: 13, lineHeight: 1.45 }}>{turn.query}</div>
+        <div style={{ maxWidth: '72%', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+          {turn.attachments && turn.attachments.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end' }}>
+              {turn.attachments.map((file, fIdx) => (
+                <div key={fIdx} style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  background: 'var(--blue-bg)', border: '1px solid var(--blue-border)',
+                  borderRadius: 8, padding: '3px 6px', fontSize: 10.5, color: 'var(--text-1)',
+                  fontWeight: 600,
+                }}>
+                  <span>{file.mime_type.startsWith('image/') ? '🖼️' : '📄'}</span>
+                  <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.filename}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {turn.query && (
+            <div style={{ padding: '8px 14px', borderRadius: '12px 4px 12px 12px', background: '#BFDBFE', color: '#1E3A8A', fontSize: 13, lineHeight: 1.45 }}>
+              {turn.query}
+            </div>
+          )}
+        </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
         <ConfiMini/>
@@ -784,6 +871,7 @@ export default function ViewAgente({ nodes, setNodes, setActive, projectName, pr
   const [pendingQuery, setPendingQuery] = useState('')
   const [showUploader, setShowUploader] = useState(false)
   const [hasRAG,       setHasRAG]       = useState(false)
+  const [selectedFiles, setSelectedFiles] = useState([])
   const bottomRef = useRef(null)
 
   const currentProjectId = projectId || localStorage.getItem('confersafe_project') || 'edificio-mirador'
@@ -816,13 +904,35 @@ export default function ViewAgente({ nodes, setNodes, setActive, projectName, pr
 
   const submit = async (text) => {
     const q = (text ?? input).trim()
-    if (!q || loading) return
-    setPendingQuery(q); setInput(''); setLoading(true)
+    if ((!q && selectedFiles.length === 0) || loading) return
+    setPendingQuery(q || (selectedFiles.length === 1 ? `Analizando archivo: ${selectedFiles[0].name}` : `Analizando ${selectedFiles.length} archivos`))
+    setInput('')
+    setLoading(true)
     try {
-      const result = await analyze(q, nodes, currentProjectId)
-      setTurns(prev => [...prev, { query: q, result }])
-    } catch { /* silent */ }
-    finally { setLoading(false); setPendingQuery('') }
+      const attachments = await Promise.all(selectedFiles.map(async (file) => {
+        const base64 = await fileToBase64(file)
+        return {
+          base64,
+          mime_type: file.type || 'application/octet-stream',
+          filename: file.name,
+        }
+      }))
+
+      const finalQuery = q || (selectedFiles.length === 1 ? `Analiza este archivo: ${selectedFiles[0].name}` : `Analiza estos archivos: ${selectedFiles.map(f => f.name).join(', ')}`)
+      const result = await analyze(finalQuery, nodes, currentProjectId, attachments)
+      
+      setTurns(prev => [...prev, { 
+        query: finalQuery, 
+        result,
+        attachments: attachments.map(att => ({ filename: att.filename, mime_type: att.mime_type }))
+      }])
+      setSelectedFiles([])
+    } catch (e) {
+      console.error("[Submit Error]", e)
+    } finally {
+      setLoading(false)
+      setPendingQuery('')
+    }
   }
 
   // Cuando el uploader tiene éxito, reemplazamos los nodos y cerramos
@@ -928,7 +1038,7 @@ export default function ViewAgente({ nodes, setNodes, setActive, projectName, pr
           </div>
           )}
 
-          <InputRow value={input} onChange={setInput} onSubmit={() => submit()} placeholder="Pregunta sobre el proyecto..." autoFocus/>
+          <InputRow value={input} onChange={setInput} onSubmit={() => submit()} placeholder="Pregunta sobre el proyecto o adjunta archivos..." autoFocus selectedFiles={selectedFiles} setSelectedFiles={setSelectedFiles}/>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 12 }}>
             {CHIPS.map((c, i) => (
@@ -970,8 +1080,26 @@ export default function ViewAgente({ nodes, setNodes, setActive, projectName, pr
           {turns.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <div style={{ maxWidth: '72%', padding: '10px 16px', borderRadius: '14px 4px 14px 14px', background: 'var(--blue)', color: '#fff', fontSize: 13.5, lineHeight: 1.5, boxShadow: 'var(--shadow-md)' }}>
-                  {turns[turns.length - 1].query}
+                <div style={{ maxWidth: '72%', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                  {turns[turns.length - 1].attachments && turns[turns.length - 1].attachments.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end' }}>
+                      {turns[turns.length - 1].attachments.map((file, fIdx) => (
+                        <div key={fIdx} style={{
+                          display: 'flex', alignItems: 'center', gap: 5,
+                          background: 'var(--blue)', border: '1px solid var(--blue-border)',
+                          borderRadius: 8, padding: '4px 8px', fontSize: 11, color: '#fff',
+                        }}>
+                          <span>{file.mime_type.startsWith('image/') ? '🖼️' : '📄'}</span>
+                          <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.filename}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {turns[turns.length - 1].query && (
+                    <div style={{ padding: '10px 16px', borderRadius: '14px 4px 14px 14px', background: 'var(--blue)', color: '#fff', fontSize: 13.5, lineHeight: 1.5, boxShadow: 'var(--shadow-md)' }}>
+                      {turns[turns.length - 1].query}
+                    </div>
+                  )}
                 </div>
               </div>
               <FullResponse result={turns[turns.length - 1].result} setActive={setActive} nodes={nodes} setNodes={setNodes}/>
@@ -981,8 +1109,26 @@ export default function ViewAgente({ nodes, setNodes, setActive, projectName, pr
           {loading && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <div style={{ maxWidth: '72%', padding: '10px 16px', borderRadius: '14px 4px 14px 14px', background: 'var(--blue)', color: '#fff', fontSize: 13.5, lineHeight: 1.5, boxShadow: 'var(--shadow-md)' }}>
-                  {pendingQuery}
+                <div style={{ maxWidth: '72%', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                  {selectedFiles.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end' }}>
+                      {selectedFiles.map((file, fIdx) => (
+                        <div key={fIdx} style={{
+                          display: 'flex', alignItems: 'center', gap: 5,
+                          background: 'var(--blue)', border: '1px solid var(--blue-border)',
+                          borderRadius: 8, padding: '4px 8px', fontSize: 11, color: '#fff',
+                        }}>
+                          <span>{file.type.startsWith('image/') ? '🖼️' : '📄'}</span>
+                          <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {pendingQuery && (
+                    <div style={{ padding: '10px 16px', borderRadius: '14px 4px 14px 14px', background: 'var(--blue)', color: '#fff', fontSize: 13.5, lineHeight: 1.5, boxShadow: 'var(--shadow-md)' }}>
+                      {pendingQuery}
+                    </div>
+                  )}
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
@@ -1031,9 +1177,10 @@ export default function ViewAgente({ nodes, setNodes, setActive, projectName, pr
             </button>
           </div>
 
-          <InputRow value={input} onChange={setInput} onSubmit={() => submit()} disabled={loading} placeholder="Siguiente pregunta..."/>
+          <InputRow value={input} onChange={setInput} onSubmit={() => submit()} disabled={loading} placeholder="Siguiente pregunta..." selectedFiles={selectedFiles} setSelectedFiles={setSelectedFiles}/>
         </div>
       </div>
     </div>
   )
 }
+

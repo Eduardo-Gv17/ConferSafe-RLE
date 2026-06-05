@@ -114,11 +114,17 @@ class NodesBatchUpsert(BaseModel):
 
 # ── Agent / Chat ───────────────────────────────────────────────────────────────
 
+class Attachment(BaseModel):
+    base64: str
+    mime_type: str
+    filename: str
+
 class AgentRequest(BaseModel):
     query: str
     project_id: str
     nodes: List[dict]
     conversation_history: Optional[List[dict]] = []
+    attachments: Optional[List[Attachment]] = None
 
 class CriticalDecision(BaseModel):
     id: str

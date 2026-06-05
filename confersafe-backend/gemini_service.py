@@ -321,6 +321,7 @@ async def call_gemini(
     nodes: List[dict],
     conversation_history: Optional[List[dict]] = None,
     rag_context: Optional[str] = None,
+    attachments: Optional[List[dict]] = None,
 ) -> dict:
     """
     Punto de entrada principal con routing de intents.
@@ -359,12 +360,30 @@ async def call_gemini(
 
     full_prompt = f"{system_prompt}\n\n{context}\n\nPREGUNTA DEL USUARIO: {query}"
 
+    # Preparar el contenido (multimodal si hay adjuntos)
+    # Preparar el contenido (multimodal si hay adjuntos)
+    if attachments:
+        import base64
+        contents = []
+        for att in attachments:
+            try:
+                file_data = base64.b64decode(att["base64"])
+                contents.append({
+                    "mime_type": att["mime_type"],
+                    "data": file_data
+                })
+            except Exception as e:
+                print(f"[Attachment Error] Failed to decode base64: {e}")
+        contents.append(full_prompt)
+    else:
+        contents = full_prompt
+
     try:
         if gemini_history:
             chat = _model.start_chat(history=gemini_history)
-            response = chat.send_message(full_prompt)
+            response = chat.send_message(contents)
         else:
-            response = _model.generate_content(full_prompt)
+            response = _model.generate_content(contents)
 
         raw_text = response.text.strip()
         print(f"[Gemini OK] {routing_mode} | {len(raw_text)} chars")

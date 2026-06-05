@@ -25,12 +25,19 @@ async def analyze(request: schemas.AgentRequest, db: Session = Depends(get_db)):
     # RAG context viene de la BD — sobrevive reinicios de Render
     rag_context = project.rag_context
 
+    attachments_dict = (
+        [a.model_dump() if hasattr(a, "model_dump") else a.dict() for a in request.attachments]
+        if request.attachments
+        else None
+    )
+
     result = await call_gemini(
         query=request.query,
         project_id=request.project_id,
         nodes=request.nodes,
         conversation_history=request.conversation_history,
         rag_context=rag_context,
+        attachments=attachments_dict,
     )
 
     try:
