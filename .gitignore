@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 *.env
 *.node_modules
+__pycache__/
+*.pyc
+confersafe-backend/__pycache__/
