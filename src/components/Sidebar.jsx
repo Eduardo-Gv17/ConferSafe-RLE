@@ -20,7 +20,7 @@ export default function Sidebar({ active, setActive, alertCount, progress, compl
       <div style={{ padding: '20px 18px 14px', background : '#023047'  }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <img
-            src="logo.png"
+            src="src/logo.png"
             alt="ConferSafe"
             style={{ width: 36, height: 36, borderRadius: 10, objectFit: 'contain', flexShrink: 0}}
           />
