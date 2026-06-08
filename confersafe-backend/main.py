@@ -1,16 +1,15 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-import uvicorn
 
 from database import engine, Base
-from routers import projects, nodes
-from routers import agent
+from routers import projects, nodes, agent
+from routers import waitlist
+import uvicorn
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create all tables on startup
     Base.metadata.create_all(bind=engine)
     yield
 
@@ -21,20 +20,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with your frontend URL
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(projects.router, prefix="/api/projects", tags=["Proyectos"])
-app.include_router(nodes.router, prefix="/api/nodes", tags=["Decisiones"])
-app.include_router(agent.router, prefix="/api/agent", tags=["Agente IA"])
-
+app.include_router(projects.router, prefix="/api/projects",  tags=["Proyectos"])
+app.include_router(nodes.router,    prefix="/api/nodes",     tags=["Decisiones"])
+app.include_router(agent.router,    prefix="/api/agent",     tags=["Agente IA"])
+app.include_router(waitlist.router, prefix="/api/waitlist",  tags=["Waitlist"])
 
 
 @app.get("/")

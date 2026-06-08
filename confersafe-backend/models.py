@@ -12,7 +12,7 @@ class Project(Base):
     location    = Column(String)
     abbr        = Column(String(5))
     color       = Column(String(10))
-    rag_context = Column(Text, nullable=True)   # ← NUEVO: contexto RAG del XML persistido
+    rag_context = Column(Text, nullable=True)
 
     nodes = relationship("Node", back_populates="project", cascade="all, delete-orphan")
     chats = relationship("ChatHistory", back_populates="project", cascade="all, delete-orphan")
@@ -52,3 +52,15 @@ class ChatHistory(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     project = relationship("Project", back_populates="chats")
+
+
+class Waitlist(Base):
+    __tablename__ = "waitlist"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    nombre     = Column(String(200), nullable=False)
+    empresa    = Column(String(200), default="")
+    whatsapp   = Column(String(30), default="")
+    email      = Column(String(200), nullable=False, unique=True, index=True)
+    mensaje    = Column(Text, default="")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
